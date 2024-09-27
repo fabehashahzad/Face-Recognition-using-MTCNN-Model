@@ -1,146 +1,145 @@
-from flask import Flask, request, render_template, jsonify, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
 import numpy as np
-from mtcnn.mtcnn import MTCNN
 import face_recognition
 import pickle
-import io
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
-import matplotlib.pyplot as plt
-
-from matplotlib.patches import Rectangle
+from mtcnn.mtcnn import MTCNN
+from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
 
-# Create a folder to save images if it doesn't exist
-IMAGES_FOLDER = 'static/Images'
-if not os.path.exists(IMAGES_FOLDER):
-    os.makedirs(IMAGES_FOLDER)
+# Create necessary folders
+if not os.path.exists('Images'):
+    os.makedirs('Images')
+if not os.path.exists('static/uploads'):
+    os.makedirs('static/uploads')
 
-# Function to draw bounding boxes on detected faces
-def draw_facebox(image, result_list, recognized_names=None):
-    plt.imshow(image)
-    ax = plt.gca()
+IMAGES_FOLDER = 'Images'
+UPLOAD_FOLDER = 'static/uploads'
+KNOWN_FACES_FILE = 'known_faces.pkl'
 
-    for idx, result in enumerate(result_list):
-        x, y, width, height = result['box']
-        rect = Rectangle((x, y), width, height, fill=False, color='green')
-        ax.add_patch(rect)
-
-        # Add recognized names near the bounding box
-        if recognized_names and idx < len(recognized_names):
-            plt.text(x, y-10, recognized_names[idx], color='green', fontsize=12)
-
-    plt.axis('off')
-    # Save the image with bounding boxes as output
-    buffer = io.BytesIO()
-    plt.savefig(buffer, format="png")
-    plt.close()
-    buffer.seek(0)
-    return Image.open(buffer)
+# Function to save uploaded image
+def save_uploaded_image(image, name):
+    image_path = os.path.join(IMAGES_FOLDER, f'{name}.jpg')
+    image.save(image_path)
+    return image_path
 
 # Function to save face encodings
-def save_face_encoding(name, encoding, known_faces_file='known_faces.pkl'):
-    try:
-        with open(known_faces_file, 'rb') as f:
-            known_faces = pickle.load(f)
-    except FileNotFoundError:
-        known_faces = {}
-
-    known_faces[name] = encoding
-    with open(known_faces_file, 'wb') as f:
-        pickle.dump(known_faces, f)
-
-# Add image to dataset route
-@app.route('/add_to_dataset', methods=['POST'])
-def add_to_dataset():
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image uploaded'}), 400
-
-    name = request.form.get('name')
-    if not name:
-        return jsonify({'error': 'Name not provided'}), 400
-
-    image = request.files['image']
-    img = Image.open(image)
-    pixels = np.array(img)
-
-    detector = MTCNN()
-    faces = detector.detect_faces(pixels)
-
-    if faces:
-        # Save uploaded image
-        image_path = os.path.join(IMAGES_FOLDER, f'{name}.jpg')
-        img.save(image_path)
-
-        # Draw bounding boxes on the image
-        output_image = draw_facebox(pixels, faces, [name]*len(faces))
-        output_image_path = os.path.join(IMAGES_FOLDER, f'processed_{name}.png')
-        output_image.save(output_image_path)
-
-        # Save face encoding
-        face_encodings = face_recognition.face_encodings(pixels)
-        if face_encodings:
-            save_face_encoding(name, face_encodings[0])
-            return jsonify({'message': f'Image saved and encoding for {name} stored.', 'output_image': f'/static/Images/processed_{name}.png'})
-        else:
-            return jsonify({'error': 'No face encodings found'}), 400
-    else:
-        return jsonify({'error': 'No faces detected'}), 400
-
-# Recognition route to check if prediction is correct
-@app.route('/recognize', methods=['POST'])
-def recognize():
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image uploaded'}), 400
-
-    image = request.files['image']
-    img = Image.open(image)
-    pixels = np.array(img)
-
-    # Load known faces
-    try:
-        with open('known_faces.pkl', 'rb') as f:
-            known_faces = pickle.load(f)
-    except FileNotFoundError:
-        return jsonify({'error': 'No known faces found.'}), 400
-
-    known_names = list(known_faces.keys())
-    known_encodings = np.array(list(known_faces.values()))
-
-    # Detect faces and compare
-    detector = MTCNN()
-    faces = detector.detect_faces(pixels)
-
-    if not faces:
-        return jsonify({'error': 'No faces detected in the uploaded image.'}), 400
-
+def save_face_encodings(image, name):
+    pixels = np.array(image)
     face_encodings = face_recognition.face_encodings(pixels)
 
-    # Check for matches
-    matched_names = []
+    if len(face_encodings) > 0:
+        try:
+            with open(KNOWN_FACES_FILE, 'rb') as f:
+                known_faces = pickle.load(f)
+        except FileNotFoundError:
+            known_faces = {}
+
+        known_faces[name] = face_encodings[0]
+
+        with open(KNOWN_FACES_FILE, 'wb') as f:
+            pickle.dump(known_faces, f)
+        return True
+    return False
+
+# Load known faces from the dataset
+def load_known_faces():
+    known_faces = {}
+    if os.path.exists(KNOWN_FACES_FILE):
+        with open(KNOWN_FACES_FILE, 'rb') as f:
+            known_faces = pickle.load(f)
+    return known_faces
+
+# Compare new faces with known encodings
+def compare_faces(face_encodings, known_faces):
+    recognized_names = []
+
     for encoding in face_encodings:
-        matches = face_recognition.compare_faces(known_encodings, encoding)
-        for i, match in enumerate(matches):
-            if match:
-                matched_names.append(known_names[i])
+        match_found = False
+        for name, known_encoding in known_faces.items():
+            # Use a tolerance to decide whether the faces match
+            results = face_recognition.compare_faces([known_encoding], encoding, tolerance=0.6)
+            if results[0]:
+                recognized_names.append(name)
+                match_found = True
+                break
+        if not match_found:
+            recognized_names.append("Match not found")
+    return recognized_names
 
-    if matched_names:
-        return jsonify({'matched_names': matched_names})
-    else:
-        return jsonify({'message': 'No matches found.'})
-
-# Home route
+# Route for the home page with buttons
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Route to serve processed images
-@app.route('/static/Images/<path:filename>')
-def serve_image(filename):
-    return send_from_directory(IMAGES_FOLDER, filename)
+# Handle the upload and dataset functionalities
+@app.route('/upload', methods=['POST'])
+def upload():
+    if 'image' not in request.files:
+        return redirect(url_for('index'))
 
-if __name__ == "__main__":
+    file = request.files['image']
+    if file.filename == '':
+        return redirect(url_for('index'))
+
+    image = Image.open(file.stream)
+
+    # Save the image temporarily to display it later
+    temp_image_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    image.save(temp_image_path)
+
+    if request.form.get('action') == 'dataset':
+        # For dataset button, save with the name entered
+        name = request.form.get('name')
+        if name:
+            save_uploaded_image(image, name)
+            save_face_encodings(image, name)
+            return f"Image saved and face encoded for {name}."
+        else:
+            return "Name required for dataset!"
+
+    elif request.form.get('action') == 'upload':
+        # For upload button, process for recognition
+        detector = MTCNN()
+        pixels = np.array(image)
+        faces = detector.detect_faces(pixels)
+
+        if faces:
+            known_faces = load_known_faces()
+
+            # Extract the face locations for recognition
+            face_locations = [(face['box'][1], face['box'][0] + face['box'][2],
+                               face['box'][1] + face['box'][3], face['box'][0]) for face in faces]
+
+            # Get the face encodings for all detected faces
+            face_encodings = face_recognition.face_encodings(pixels, face_locations)
+
+            # Compare each face encoding with known faces
+            recognized_names = compare_faces(face_encodings, known_faces)
+
+            # Draw rectangles and names on the image around detected faces
+            draw = ImageDraw.Draw(image)
+            font = ImageFont.load_default()  # Load default PIL font
+
+            for face, name in zip(faces, recognized_names):
+                x, y, width, height = face['box']
+                draw.rectangle(((x, y), (x + width, y + height)), outline="red", width=3)
+
+                # Draw name above the rectangle
+                draw.text((x, y - 10), name, fill="green", font=font)
+
+            # Save the image with rectangles and names in the 'static/uploads' folder
+            image_with_boxes_path = os.path.join(UPLOAD_FOLDER, 'boxed_' + file.filename)
+            image.save(image_with_boxes_path)
+
+            # Only pass the filename to the template
+            return render_template('result.html', image_path='boxed_' + file.filename)
+        else:
+            return "No faces detected."
+
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
     app.run(debug=True)
