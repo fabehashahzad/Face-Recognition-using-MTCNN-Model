@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Face Recognition Results</title>
+</head>
+<body>
+    <h1>Face Recognition Results</h1>
+
+    <h3>Uploaded Image with Face Detection:</h3>
+    <img src="{{ url_for('static', filename='uploads/' + image_path) }}" alt="Uploaded Image" style="max-width: 400px;"><br><br>
+
+    <h3>Recognized Faces:</h3>
+    <ul>
+        {% for name in names %}
+            <li>{{ name }}</li>
+        {% endfor %}
+    </ul>
+
+    <a href="/">Back to Home</a>
+</body>
+</html>
