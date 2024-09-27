@@ -1,68 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Face Recognition</title>
 </head>
 <body>
-    <h1>Face Recognition System</h1>
+    <h1>Face Recognition App</h1>
+    <form action="/upload" method="POST" enctype="multipart/form-data">
+        <label for="name">Name (for Dataset):</label>
+        <input type="text" id="name" name="name"><br><br>
+        <input type="file" name="image" required><br><br>
 
-    <h2>Add to Dataset</h2>
-    <form action="/add_to_dataset" method="POST" enctype="multipart/form-data">
-        <label for="name">Enter Name:</label>
-        <input type="text" name="name" required><br><br>
-
-        <label for="image">Upload Image:</label>
-        <input type="file" name="image" accept="image/*" required><br><br>
-
-        <button type="submit">Add to Dataset</button>
+        <button type="submit" name="action" value="dataset">Add to Dataset</button>
+        <button type="submit" name="action" value="upload">Upload for Recognition</button>
     </form>
-
-    <h2>Recognize Face</h2>
-    <form action="/recognize" method="POST" enctype="multipart/form-data">
-        <label for="recognize_image">Upload Image to Recognize:</label>
-        <input type="file" name="image" accept="image/*" required><br><br>
-
-        <button type="submit">Recognize Face</button>
-    </form>
-
-    <div id="output-container" style="margin-top: 20px;">
-        <h2>Output</h2>
-        <pre id="output-message"></pre>
-    </div>
-
-    <script>
-        const outputContainer = document.getElementById('output-container');
-        const outputMessage = document.getElementById('output-message');
-
-        document.querySelector('form[action="/add_to_dataset"]').onsubmit = async (event) => {
-            event.preventDefault();
-            const formData = new FormData(event.target);
-            const response = await fetch('/add_to_dataset', {
-                method: 'POST',
-                body: formData,
-            });
-
-            const result = await response.json();
-            outputMessage.textContent = result.message || result.error;
-        };
-
-        document.querySelector('form[action="/recognize"]').onsubmit = async (event) => {
-            event.preventDefault();
-            const formData = new FormData(event.target);
-            const response = await fetch('/recognize', {
-                method: 'POST',
-                body: formData,
-            });
-
-            const result = await response.json();
-            if (result.matched_names) {
-                outputMessage.textContent = 'Matched Names: ' + result.matched_names.join(', ');
-            } else {
-                outputMessage.textContent = result.message || result.error;
-            }
-        };
-    </script>
 </body>
 </html>
